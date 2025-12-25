@@ -185,41 +185,45 @@ class Player:
         # INSERT_YOUR_CODE
         import inspect
 
-        with db_call_guard("Player.save_to_db"):
-            frame = inspect.currentframe()
-            caller_frame = frame.f_back
-            caller_name = caller_frame.f_code.co_name if caller_frame else None
-            print(
-                f" >> save_to_db was called by: {caller_name} -> ",
-                self.balancesheet.liabilities[1],
-            )
+        try:
+            with db_call_guard("Player.save_to_db"):
+                frame = inspect.currentframe()
+                caller_frame = frame.f_back
+                caller_name = caller_frame.f_code.co_name if caller_frame else None
+                # Prevent IndexError when liabilities is empty or has fewer than 2 items
+                liabilities = getattr(self.balancesheet, "liabilities", [])
+               
+                print(f" >> save_to_db was called by: {caller_name} -> ")
 
-            data = self.to_dict()
+                data = self.to_dict()
 
-            # Always store balancesheet id as a string, or fallback to embedded id/val
-            balancesheet_id = getattr(self.balancesheet, "id", None)
-            bs_value = data.get("balancesheet")
-            if balancesheet_id is not None:
-                data["balancesheet"] = str(balancesheet_id)
-            elif isinstance(bs_value, dict):
-                data["balancesheet"] = bs_value.get("id")
-            else:
-                data["balancesheet"] = bs_value
+                # Always store balancesheet id as a string, or fallback to embedded id/val
+                balancesheet_id = getattr(self.balancesheet, "id", None)
+                bs_value = data.get("balancesheet")
+                if balancesheet_id is not None:
+                    data["balancesheet"] = str(balancesheet_id)
+                elif isinstance(bs_value, dict):
+                    data["balancesheet"] = bs_value.get("id")
+                else:
+                    data["balancesheet"] = bs_value
 
-            if hasattr(self.bank, "id"):
-                data["bank"] = self.bank.id
-            elif isinstance(data["bank"], str):
-                data["bank"] = self.bank
+                if hasattr(self.bank, "id"):
+                    data["bank"] = self.bank.id
+                elif isinstance(data["bank"], str):
+                    data["bank"] = self.bank
 
-            users_collection = db["users-collection"]
-            users_collection.replace_one({"username": self.username}, data, upsert=True)
-            # Save balancesheet in its own document/collection as well, under the username
-            if (
-                not skip_balancesheet
-                and self.balancesheet is not None
-                and self.username is not None
-            ):
-                self.balancesheet.save_to_db(self.username)
+                users_collection = db["users-collection"]
+                users_collection.replace_one({"username": self.username}, data, upsert=True)
+                # Save balancesheet in its own document/collection as well, under the username
+                if (
+                    not skip_balancesheet
+                    and self.balancesheet is not None
+                    and self.username is not None
+                ):
+                    self.balancesheet.save_to_db(self.username)
+        except Exception as e:
+            print(f"Exception occurred in Player.save_to_db: {e}")
+            raise
 
     @classmethod
     def create_and_save(
