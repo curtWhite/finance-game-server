@@ -1,11 +1,9 @@
 # INSERT_YOUR_CODE
 from flask import request, jsonify
-from app import app
+from app import app, socketio
 from app.BackgroundThreads import bg_update_liability
 from classes.BalanceSheet.index import BalanceSheet
-from classes.Bank.index import Bank
 from classes.Player.index import Player
-from threading import Thread
 
 
 # Import the mock_balancesheet_for_working_class function
@@ -132,14 +130,13 @@ def update_liability(username):
 
     bs = BalanceSheet(player=player)
 
-    thread = Thread(target=bg_update_liability, args=(bs, username, updates, player))
-    thread.start()
-    thread.join(timeout=2)
-
+    # Use socketio.start_background_task for better compatibility with eventlet workers
+    # This ensures proper async handling with Flask-SocketIO and Gunicorn
+    socketio.start_background_task(bg_update_liability, bs, username, updates, player)
 
     return jsonify(
         {
-            "message": "Liability updated.",
+            "message": "Liability update is being processed in the background.",
             "balancesheet": bs.to_dict(),
         }
     ), 200

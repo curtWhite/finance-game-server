@@ -1,111 +1,249 @@
+"""
+Background thread functions for async operations.
+These functions are designed to work with Flask-SocketIO and Gunicorn eventlet workers.
+
+When using eventlet workers, background tasks should use socketio.start_background_task()
+or eventlet.spawn() instead of standard Python threading.Thread for proper async handling.
+"""
 import time
-from app import socketio
-import random
+from app import socketio, app
+import logging
 
 from classes.BalanceSheet.index import BalanceSheet
 from classes.Bank.index import Bank
 from classes.Player.index import Player
 
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+def _emit_to_room(socketio_instance, event, data, room, namespace=None):
+    """
+    Safely emit a socket event to a room, with error handling.
+    
+    Args:
+        socketio_instance: The SocketIO instance
+        event: Event name
+        data: Event data
+        room: Room name (typically username)
+        namespace: Optional namespace
+    """
+    try:
+        # Check if room exists and has connected clients
+        # Note: This check may not be perfect with eventlet, but helps with debugging
+        socketio_instance.emit(
+            event,
+            data,
+            room=room,
+            namespace=namespace,
+            callback=None
+        )
+        logger.info(f"Emitted '{event}' to room '{room}' for user '{data.get('username', 'unknown')}'")
+    except Exception as e:
+        logger.error(f"Failed to emit '{event}' to room '{room}': {str(e)}")
+        # Still try to emit without room (broadcast) as fallback if room doesn't exist
+        try:
+            socketio_instance.emit(
+                event,
+                {**data, "room_error": f"Room '{room}' may not exist, broadcasting instead"},
+                namespace=namespace
+            )
+        except Exception as broadcast_error:
+            logger.error(f"Failed to broadcast '{event}': {str(broadcast_error)}")
+
 
 def async_apply_and_hire(job_instance, player_instance):
+    """
+    Background task to process job application and hiring.
+    This function runs in a background thread/task and emits SocketIO events when complete.
+    
+    Args:
+        job_instance: Job instance to apply for
+        player_instance: Player instance applying for the job
+    """
     # random_seconds = random.randint(10, 300)
     time.sleep(5)
-    try:
-        # Check if the player meets the job's qualification requirements (if such requirements exist)
-        job_qualifications = getattr(job_instance, "requirements", [])
-        player_qualifications = getattr(player_instance, "qualifications", [])
-        balancesheet = BalanceSheet(player=player_instance)
-        player_instance.balancesheet = balancesheet
+    
+    # Ensure we have Flask application context for database operations
+    with app.app_context():
+        try:
+            # Check if the player meets the job's qualification requirements (if such requirements exist)
+            job_qualifications = getattr(job_instance, "requirements", [])
+            player_qualifications = getattr(player_instance, "qualifications", [])
+            balancesheet = BalanceSheet(player=player_instance)
+            player_instance.balancesheet = balancesheet
 
-        # Only check qualifications if there are job requirements specified
-        if job_qualifications:
-            print(f"Job qualifications: {job_qualifications}")
-            # Each required qualification must be in the player's qualifications list
-            missing_qualifications = [
-                q
-                for q in job_qualifications
-                if q not in player_qualifications and q not in ["None", None]
-            ]
-            if missing_qualifications:
-                raise ValueError(
-                    f"Player '{player_instance.username}' does not meet the following qualification requirements for this job: {missing_qualifications}"
-                )
+            # Only check qualifications if there are job requirements specified
+            if job_qualifications:
+                logger.info(f"Job qualifications: {job_qualifications}")
+                # Each required qualification must be in the player's qualifications list
+                missing_qualifications = [
+                    q
+                    for q in job_qualifications
+                    if q not in player_qualifications and q not in ["None", None]
+                ]
+                if missing_qualifications:
+                    raise ValueError(
+                        f"Player '{player_instance.username}' does not meet the following qualification requirements for this job: {missing_qualifications}"
+                    )
 
-        job_instance.hire(player_instance)
+            job_instance.hire(player_instance)
 
-        print(f'[DEBUG] Player balacesheet gb applyJob -- {balancesheet.to_dict()}')
+            logger.info(f'[DEBUG] Player balancesheet after applyJob -- {balancesheet.to_dict()}')
 
-        socketio.emit(
-            "job_application_complete",
-            {
-                "username": player_instance.username,
-                "job_id": str(job_instance._id),
-                "message": f"Job application process for '{job_instance.title}' at '{job_instance.company}' complete.",
-                "payload": {
-                    "job": job_instance.to_dict(),
-                    "time_slots": player_instance.time_slots,
-                    "balancesheet": balancesheet.to_dict(),
+            # Emit success event to the player's room
+            _emit_to_room(
+                socketio,
+                "job_application_complete",
+                {
+                    "username": player_instance.username,
+                    "job_id": str(job_instance._id),
+                    "message": f"Job application process for '{job_instance.title}' at '{job_instance.company}' complete.",
+                    "payload": {
+                        "job": job_instance.to_dict(),
+                        "time_slots": player_instance.time_slots,
+                        "balancesheet": balancesheet.to_dict(),
+                    },
                 },
-            },
-            room=player_instance.username,
-        )
-    except Exception as e:
-        # Remove the current player's application from the list if present
-        job_instance.applications = [
-            a
-            for a in job_instance.applications
-            if a.get("username") != player_instance.username
-        ]
-        job_instance.save_to_db()
-        socketio.emit(
-            "job_application_complete",
-            {
-                "username": player_instance.username,
-                "job_id": str(job_instance._id),
-                "error": str(e),
-            },
-            room=player_instance.username,
-        )
+                room=player_instance.username,
+            )
+        except Exception as e:
+            logger.error(f"Error processing job application for {player_instance.username}: {str(e)}")
+            # Remove the current player's application from the list if present
+            try:
+                job_instance.applications = [
+                    a
+                    for a in job_instance.applications
+                    if a.get("username") != player_instance.username
+                ]
+                job_instance.save_to_db()
+            except Exception as save_error:
+                logger.error(f"Failed to clean up job application: {str(save_error)}")
+            
+            # Emit error event to the player's room
+            _emit_to_room(
+                socketio,
+                "job_application_complete",
+                {
+                    "username": player_instance.username,
+                    "job_id": str(job_instance._id),
+                    "error": str(e),
+                    "success": False,
+                },
+                room=player_instance.username,
+            )
 
 
 def bg_payment(bank: "Bank", player: "Player", amount, recipient):
-    try:
-        # INSERT_YOUR_CODE
-        print(f"[DEBUG] Starting background payment: player={player.username}, amount={amount}, recipient={recipient}")
-        bank.make_payment(amount, recipient)
-        bank.save_bank_data()
-        bs = BalanceSheet(player=player)
+    """
+    Background task to process bank payments.
+    This function runs in a background thread/task and emits SocketIO events when complete.
+    
+    Args:
+        bank: Bank instance
+        player: Player instance making the payment
+        amount: Payment amount
+        recipient: Payment recipient
+    """
+    # Ensure we have Flask application context for database operations
+    with app.app_context():
+        try:
+            logger.info(f"[DEBUG] Starting background payment: player={player.username}, amount={amount}, recipient={recipient}")
+            bank.make_payment(amount, recipient)
+            bank.save_bank_data()
+            bs = BalanceSheet(player=player)
 
-        socketio.emit(
-            "payment_complete",
-            {
-                "username": player.username,
-                "message": recipient,
-                "payload": {"balancesheet": bs.to_dict(), "bank": bank.to_dict()},
-            },
-            room=player.username,
-        )
+            # Emit success event to the player's room
+            _emit_to_room(
+                socketio,
+                "payment_complete",
+                {
+                    "username": player.username,
+                    "message": f"Payment of {amount} to {recipient} completed successfully",
+                    "payload": {
+                        "balancesheet": bs.to_dict(),
+                        "bank": bank.to_dict(),
+                    },
+                },
+                room=player.username,
+            )
+            logger.info(f"Payment completed successfully for {player.username}")
 
-    except Exception as e:
-        # Log if needed
-        pass
+        except ValueError as e:
+            # Business logic errors (e.g., insufficient funds)
+            logger.warning(f"Payment failed for {player.username}: {str(e)}")
+            _emit_to_room(
+                socketio,
+                "payment_complete",
+                {
+                    "username": player.username,
+                    "error": str(e),
+                    "success": False,
+                    "message": f"Payment failed: {str(e)}",
+                },
+                room=player.username,
+            )
+        except Exception as e:
+            # Unexpected errors
+            logger.error(f"Unexpected error processing payment for {player.username}: {str(e)}", exc_info=True)
+            _emit_to_room(
+                socketio,
+                "payment_complete",
+                {
+                    "username": player.username,
+                    "error": "An unexpected error occurred while processing the payment",
+                    "success": False,
+                    "message": "Payment processing failed due to a server error",
+                },
+                room=player.username,
+            )
 
 
-def bg_update_liability(bs:"BalanceSheet", username, updates, player):
-    result = bs.update_liability_in_db(username=username, updates=updates)
+def bg_update_liability(bs: "BalanceSheet", username, updates, player):
+    """
+    Background task to update liabilities in the balance sheet.
+    This function runs in a background thread/task and emits SocketIO events when complete.
+    
+    Args:
+        bs: BalanceSheet instance
+        username: Username of the player
+        updates: List of liability updates
+        player: Player instance
+    """
+    # Ensure we have Flask application context for database operations
+    with app.app_context():
+        try:
+            logger.info(f"Updating liabilities for {username}")
+            result = bs.update_liability_in_db(username=username, updates=updates)
 
-    # Refresh balancesheet in-memory after db update
+            # Refresh balancesheet in-memory after db update
+            player.balancesheet = result
+            # Avoid triggering another balancesheet save that could overwrite with stale data
+            player.save_to_db(skip_balancesheet=True)
 
-    player.balancesheet = result
-    # Avoid triggering another balancesheet save that could overwrite with stale data
-    player.save_to_db(skip_balancesheet=True)
+            # Emit success event to the player's room
+            _emit_to_room(
+                socketio,
+                "liabilities_offset_complete",
+                {
+                    "username": player.username,
+                    "message": "Liabilities updated successfully",
+                    "payload": {"balancesheet": player.to_dict().get("balancesheet")},
+                },
+                room=player.username,
+            )
+            logger.info(f"Liabilities updated successfully for {username}")
 
-    socketio.emit(
-        "liabilities_offset_complete",
-        {
-            "username": player.username,
-            "message": 'Liablities updated',
-            "payload": {"balancesheet": player.to_dict().get("balancesheet")},
-        },
-        room=player.username,
-    )
+        except Exception as e:
+            logger.error(f"Error updating liabilities for {username}: {str(e)}", exc_info=True)
+            _emit_to_room(
+                socketio,
+                "liabilities_offset_complete",
+                {
+                    "username": player.username,
+                    "error": str(e),
+                    "success": False,
+                    "message": "Failed to update liabilities",
+                },
+                room=player.username,
+            )

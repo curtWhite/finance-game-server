@@ -1,8 +1,5 @@
-# import eventlet
-# eventlet.monkey_patch()
-
-from flask import Flask, jsonify
 import os
+from flask import Flask, jsonify
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -17,7 +14,10 @@ app = Flask(__name__)
 CORS(app)
 
 # Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# Use 'eventlet' for production with Gunicorn, 'threading' for development
+# Gunicorn with eventlet workers will handle this properly
+async_mode = os.getenv('SOCKETIO_ASYNC_MODE', 'eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=async_mode)
 
 @app.route('/')
 def index():
