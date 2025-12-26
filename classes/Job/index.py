@@ -1,3 +1,4 @@
+import threading
 from app import db, socketio
 from app.BackgroundThreads import async_apply_and_hire
 from app.utils.db_guard import db_call_guard
@@ -227,9 +228,11 @@ class Job:
         )
 
         # Move the hiring logic to a background task and send a socket event when completed
-        # Use socketio.start_background_task for better compatibility with eventlet workers
-        # This ensures proper async handling with Flask-SocketIO and Gunicorn
-        socketio.start_background_task(async_apply_and_hire, self, player)
+        # Use threading.Thread for background task execution
+        # This works with Flask-SocketIO in threading mode
+        thread = threading.Thread(target=async_apply_and_hire, args=(self, player))
+        thread.daemon = True
+        thread.start()
         self.save_to_db()
 
     def hire(self, player: "Player"):

@@ -4,4 +4,3 @@ flask-cors
 pymongo
 python-dotenv
 gunicorn
-eventlet

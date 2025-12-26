@@ -1,5 +1,6 @@
 from app import app, socketio
 from flask import request, jsonify
+import threading
 from app.BackgroundThreads import bg_payment
 from classes.Bank.index import Bank
 from classes.Player.index import Player
@@ -42,9 +43,11 @@ def make_bank_payment(username):
         return jsonify({"error": f"Bank account for '{username}' not found."}), 404
 
     try:
-        # Use socketio.start_background_task for better compatibility with eventlet workers
-        # This ensures proper async handling with Flask-SocketIO and Gunicorn
-        socketio.start_background_task(bg_payment, bank, player, amount, recipient)
+        # Use threading.Thread for background task execution
+        # This works with Flask-SocketIO in threading mode
+        thread = threading.Thread(target=bg_payment, args=(bank, player, amount, recipient))
+        thread.daemon = True
+        thread.start()
         return jsonify(
             {
                 "message": f"Payment of {amount} to '{recipient}' is being processed in the background.",

@@ -10,8 +10,8 @@ backlog = 2048
 
 # Worker processes
 workers = int(os.getenv("GUNICORN_WORKERS", multiprocessing.cpu_count() * 2 + 1))
-worker_class = "eventlet"  # Required for Flask-SocketIO
-worker_connections = 1000
+worker_class = "gthread"  # Use gthread for Flask-SocketIO with threading mode
+threads = int(os.getenv("GUNICORN_THREADS", 4))  # Number of threads per worker
 timeout = 30
 keepalive = 2
 

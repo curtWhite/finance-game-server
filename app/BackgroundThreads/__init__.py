@@ -1,9 +1,9 @@
 """
 Background thread functions for async operations.
-These functions are designed to work with Flask-SocketIO and Gunicorn eventlet workers.
+These functions are designed to work with Flask-SocketIO and Gunicorn gthread workers.
 
-When using eventlet workers, background tasks should use socketio.start_background_task()
-or eventlet.spawn() instead of standard Python threading.Thread for proper async handling.
+When using threading mode, background tasks use standard Python threading.Thread
+for proper async handling with Flask-SocketIO.
 """
 import time
 from app import socketio, app
@@ -30,7 +30,7 @@ def _emit_to_room(socketio_instance, event, data, room, namespace=None):
     """
     try:
         # Check if room exists and has connected clients
-        # Note: This check may not be perfect with eventlet, but helps with debugging
+        # Note: This works with threading mode for Flask-SocketIO
         socketio_instance.emit(
             event,
             data,

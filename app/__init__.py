@@ -1,8 +1,3 @@
-# CRITICAL: eventlet.monkey_patch() must be called before ANY other imports
-# This ensures all threading primitives (RLock, Lock, etc.) are properly greened
-import eventlet
-eventlet.monkey_patch()
-
 import os
 from flask import Flask, jsonify
 from pymongo import MongoClient
@@ -19,9 +14,9 @@ app = Flask(__name__)
 CORS(app)
 
 # Initialize SocketIO
-# Use 'eventlet' for production with Gunicorn, 'threading' for development
-# Gunicorn with eventlet workers will handle this properly
-async_mode = os.getenv('SOCKETIO_ASYNC_MODE', 'eventlet')
+# Using 'threading' async mode for standard Python threading support
+# This works with Gunicorn gthread workers
+async_mode = os.getenv('SOCKETIO_ASYNC_MODE', 'threading')
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode=async_mode)
 
 @app.route('/')
