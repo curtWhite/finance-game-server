@@ -1,3 +1,7 @@
+# CRITICAL: eventlet.monkey_patch() must be called before ANY other imports
+import eventlet
+eventlet.monkey_patch()
+
 from app import app, socketio
 
 if __name__ == '__main__':

@@ -1,3 +1,8 @@
+# CRITICAL: eventlet.monkey_patch() must be called before ANY other imports
+# This ensures all threading primitives (RLock, Lock, etc.) are properly greened
+import eventlet
+eventlet.monkey_patch()
+
 import os
 from flask import Flask, jsonify
 from pymongo import MongoClient
