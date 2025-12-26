@@ -6,6 +6,9 @@ When using Gunicorn with eventlet workers, the monkey patching is handled
 automatically by the worker class. The application object is what Gunicorn
 will use to serve requests.
 """
+import eventlet
+eventlet.monkey_patch()
+
 from app import app, socketio
 
 # This is the application object that Gunicorn will use
