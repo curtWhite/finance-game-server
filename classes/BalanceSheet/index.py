@@ -336,7 +336,9 @@ class BalanceSheet:
             "expenses": copy.deepcopy(self.expenses),
             "net_worth": self.net_worth(),
             "cashflow": self.cashflow(),
-            "prev_balancesheet": self.get_prev_balancesheet(getattr(self.player,"username", None)),
+            "prev_balancesheet": self.get_prev_balancesheet(
+                getattr(self.player, "username", None)
+            ),
             "id": self.id,
         }
         if self.id is not None:
@@ -367,7 +369,7 @@ class BalanceSheet:
         collection = db["balancesheet-collection"]
         bs = collection.find_one({"username": target_username}, sort=[("_id", -1)])
         prev_bs = bs.get("prev_balancesheet")
-        
+
         if prev_bs:
             return json.loads(prev_bs)
         return None
@@ -471,9 +473,9 @@ class BalanceSheet:
         with db_call_guard("BalanceSheet.save_to_db"):
             collection = db["balancesheet-collection"]
             data = self.to_dict()
+            data.pop("prev_balancesheet", None)
 
             prev_balancesheet = collection.find_one({"username": username})
-            
 
             current_cashflow = data.get("cashflow", 0)
             prev_cashflow = prev_balancesheet.get("cashflow", 0)
@@ -481,9 +483,7 @@ class BalanceSheet:
             if not prev_balancesheet or (current_cashflow != prev_cashflow):
                 if not prev_balancesheet:
                     prev_balancesheet = json.dumps(data)
-                prev_balancesheet = {
-                    **prev_balancesheet
-                }
+                prev_balancesheet = {**prev_balancesheet}
                 prev_balancesheet.pop("_id", None)
                 prev_balancesheet.pop("prev_balancesheet", None)
                 data["prev_balancesheet"] = json.dumps(prev_balancesheet)
