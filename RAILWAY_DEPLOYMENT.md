@@ -30,9 +30,10 @@ This project is ready to deploy to Railway! Follow these steps:
 
 ## Optional Environment Variables
 
-- `GUNICORN_WORKERS`: Number of worker processes (defaults to CPU count * 2 + 1)
+- `GUNICORN_WORKERS`: Number of worker processes (defaults to 2 on Railway to prevent memory issues)
 - `GUNICORN_THREADS`: Threads per worker (defaults to 2)
 - `GUNICORN_LOG_LEVEL`: Log level - `debug`, `info`, `warning`, `error` (defaults to `info`)
+- `GUNICORN_MAX_REQUESTS`: Max requests per worker before restart (defaults to 1000, helps prevent memory leaks)
 
 ## What's Configured
 
@@ -67,6 +68,11 @@ railway up
 - **App crashes on start**: Verify `MONGO_DB_CONNECTION_STRING` is set correctly
 - **Socket.IO not working**: Ensure `SOCKETIO_ASYNC_MODE=threading` is set
 - **Port errors**: Railway automatically sets PORT, no manual configuration needed
+- **SIGKILL / Out of Memory errors**: 
+  - Set `GUNICORN_WORKERS=1` or `GUNICORN_WORKERS=2` in Railway environment variables
+  - Reduce `GUNICORN_THREADS=1` if still having issues
+  - Consider upgrading your Railway plan for more memory
+  - The default is now 2 workers, but you can reduce to 1 if needed
 
 ## Viewing Logs
 

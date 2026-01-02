@@ -25,8 +25,9 @@ Railway is a cloud platform that makes deployment simple. The project is already
    In your Railway project settings, add the following environment variables:
    - `MONGO_DB_CONNECTION_STRING`: Your MongoDB connection string
    - `SOCKETIO_ASYNC_MODE`: Set to `threading` (default, already configured)
-   - `GUNICORN_WORKERS`: (Optional) Number of workers (defaults to CPU count * 2 + 1)
+   - `GUNICORN_WORKERS`: (Optional) Number of workers (defaults to 2 on Railway to prevent memory issues)
    - `GUNICORN_THREADS`: (Optional) Threads per worker (defaults to 2)
+   - `GUNICORN_MAX_REQUESTS`: (Optional) Max requests per worker before restart (defaults to 1000)
 
 3. **Deploy:**
    - If using GitHub: Railway will automatically detect the `Procfile` and deploy
@@ -56,6 +57,7 @@ The project includes:
 - **WebSocket Support**: Railway natively supports WebSocket connections, so Socket.IO will work without additional configuration.
 - **Environment Variables**: Set all required environment variables in the Railway dashboard under your project settings.
 - **Logs**: View logs directly in the Railway dashboard or using `railway logs` command.
+- **Memory Management**: The default worker count is set to 2 on Railway to prevent out-of-memory errors. If you experience SIGKILL errors, reduce `GUNICORN_WORKERS` to 1 in your environment variables.
 
 ---
 
