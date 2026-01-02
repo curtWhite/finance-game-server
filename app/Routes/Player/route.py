@@ -4,6 +4,7 @@ from classes.BalanceSheet.index import BalanceSheet
 from classes.Bank.index import Bank
 from classes.Job.index import Job
 from classes.Player.index import Player
+from classes.Property.index import Property
 
 
 @app.route("/api/player", methods=["GET"])
@@ -16,6 +17,7 @@ def get_player():
     job = Job(id=player.job)
     bank = Bank(customer=player)
     bs = BalanceSheet(player=player)
+    props = Property(player)
     player.balancesheet = bs
 
     if not player:
@@ -25,7 +27,10 @@ def get_player():
         result = player.to_dict()
         result["job"] = job.to_dict()
         result["bank"] = bank.to_dict()
+        result['bank']['credit_score'] = bank.calculate_credit_score(bs)
         result["balancesheet"] = bs.to_dict()
+        # result['balancesheet']['prev_balancesheet'] = bs.get_prev_balancesheet(username)
+        result['properties'] = props.load_all_owned_properties()
 
         if result["job"] is not None:
             result["job"]["staff"] = []
@@ -111,4 +116,36 @@ def increase_experience():
     except Exception as e:
         return jsonify(
             {"error": "Failed to increase experience", "details": str(e)}
+        ), 500
+
+        # INSERT_YOUR_CODE
+@app.route("/api/player/add_property", methods=["POST"])
+def add_property():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing JSON body"}), 400
+
+    username = data.get("username")
+    property_item = data.get("property_item")
+    if not username or not property_item:
+        return jsonify(
+            {"error": "Missing required fields: 'username' or 'property_item'"}
+        ), 400
+
+    player = Player(username=username)
+    player = player.get_player(username)
+    if not player:
+        return jsonify({"error": f"Player '{username}' not found."}), 404
+
+    try:
+        player.add_property(property_item)
+        return jsonify(
+            {
+                "message": f"Property added for player '{username}'.",
+                "player": player.to_dict(),
+            }
+        ), 200
+    except Exception as e:
+        return jsonify(
+            {"error": "Failed to add property", "details": str(e)}
         ), 500

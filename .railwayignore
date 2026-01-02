@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.bat
+*.sh
+DEPLOYMENT.md
+SOCKETIO_BACKGROUND_TASKS.md
+
+# Logs
+*.log
+
+# Environment files (Railway uses its own env vars)
+.env
+.env.local
+.env.*.local
+

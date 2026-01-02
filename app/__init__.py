@@ -31,6 +31,7 @@ from .Routes.Bank.route import *
 from .Routes.Player.route import *
 from .Routes.GameBank.route import *
 from .Routes.Job.route import *
+from .Routes.Property.route import *
 from .Routes.BalanceSheet.route import *
 # Import socket events (create this file for Socket.IO event handlers)
 from .socket_events import *

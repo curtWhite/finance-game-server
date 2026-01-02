@@ -2,9 +2,11 @@
 from flask import request, jsonify
 import threading
 from app import app
-from app.BackgroundThreads import bg_update_liability
+from app.BackgroundThreads import bg_update_asset, bg_update_liability
 from classes.BalanceSheet.index import BalanceSheet
 from classes.Player.index import Player
+import logging
+
 
 
 # Import the mock_balancesheet_for_working_class function
@@ -143,6 +145,49 @@ def update_liability(username):
             "balancesheet": bs.to_dict(),
         }
     ), 200
+
+
+# INSERT_YOUR_CODE
+@app.route("/api/balancesheet/<username>/assets/update", methods=["POST"])
+def update_assets(username):
+    """
+    Update one or more fields of one or more assets for the given user.
+
+    Request JSON:
+      {
+        "assets": [
+            {
+                "name": "Checking Account",
+                "value": 3000,
+                "income": 10,
+                ... (other asset fields)
+            },
+            ...
+        ]
+      }
+    """
+    data = request.get_json()
+    updates = data.get("assets", [])
+
+    player, error_resp, status = get_player_or_404(username)
+    if error_resp:
+        return error_resp, status
+
+    bs = BalanceSheet(player=player)
+
+    
+
+    thread = threading.Thread(target=bg_update_asset, args=(bs, username, updates, player))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify(
+        {
+            "message": "Asset update is being processed in the background.",
+            "balancesheet": bs.to_dict(),
+        }
+    ), 200
+
 
 
 @app.route("/api/balancesheet/<username>/mock/workclass", methods=["POST"])

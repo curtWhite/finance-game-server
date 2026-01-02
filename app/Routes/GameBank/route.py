@@ -1,6 +1,11 @@
 from app import app
 from flask import request, jsonify
+from app.BackgroundThreads import bg_payment, bg_salary_confirmation
 from classes.GameBank.index import GameBank
+import threading
+
+from classes.Player.index import Player
+
 
 @app.route('/api/gamebank/pay', methods=['POST'])
 def gamebank_pay():
@@ -16,9 +21,15 @@ def gamebank_pay():
     if not player_username or amount is None:
         return jsonify({"error": "Missing required fields: 'username' or 'amount'"}), 400
     try:
+        player = Player(username=player_username)
         amount = float(amount)
         bank = GameBank.get_bank()
         bank.pay_player(player_username, amount, proxy, message )
+
+        thread = threading.Thread(target=bg_salary_confirmation, args=(bank, player, amount, proxy, message))
+        thread.daemon = True
+        thread.start()
+
         return jsonify({
             "message": f"Paid {amount} to '{player_username}' from the bank.",
             "new_bank_balance": bank.balance

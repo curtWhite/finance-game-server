@@ -2,7 +2,9 @@
 
 import copy
 from app import db
+from app.utils import sum_of_values
 from app.utils.db_guard import db_call_guard
+import json
 
 
 class BalanceSheet:
@@ -34,10 +36,10 @@ class BalanceSheet:
             and player.balancesheet is not None
         ):
             loaded = self.load_from_db(id=player.balancesheet.id)
-            
+
         elif player is not None:
             loaded = self.load_from_db(username=player.username)
-            
+
         if player is not None and loaded:
             self.assets = loaded.assets
             self.liabilities = loaded.liabilities
@@ -45,7 +47,6 @@ class BalanceSheet:
             self.expenses = loaded.expenses
             self.id = loaded.id
             self.player = player
-    
 
     @property
     def id(self):
@@ -68,9 +69,10 @@ class BalanceSheet:
             self.assets[idx]["value"] += value
         else:
             self.assets.append({"name": name, "income": income, "value": value})
-            self.add_all_asset_incomes_to_income(
-                {"name": name, "income": income, "value": value}, username
-            )
+            if income > 0:
+                self.add_all_asset_incomes_to_income(
+                    {"name": name, "income": income, "value": value}, username
+                )
         if username is not None:
             self.save_to_db(username)
 
@@ -334,6 +336,7 @@ class BalanceSheet:
             "expenses": copy.deepcopy(self.expenses),
             "net_worth": self.net_worth(),
             "cashflow": self.cashflow(),
+            "prev_balancesheet": self.get_prev_balancesheet(getattr(self.player,"username", None)),
             "id": self.id,
         }
         if self.id is not None:
@@ -341,13 +344,33 @@ class BalanceSheet:
         return result
 
     def get_ammotization_of_liablity(self, liability):
-        return  self.amortization_calculation(
-                liability.get("loanAmount"),
-                liability.get("interestRate"),
-                liability.get("amortizationTerm"),
-                liability.get("compoundingFrequency"),
-                liability.get("paymentFrequency")
-            )
+        return self.amortization_calculation(
+            liability.get("loanAmount"),
+            liability.get("interestRate"),
+            liability.get("amortizationTerm"),
+            liability.get("compoundingFrequency"),
+            liability.get("paymentFrequency"),
+        )
+
+    # INSERT_YOUR_CODE
+    def get_prev_balancesheet(self, username=None):
+        """
+        Fetch the previous balancesheet for the specified user (or self.player if present).
+
+        Returns:
+            dict: The previous balancesheet as a dictionary, or None if not found.
+        """
+        # Use self.player.username if username not provided
+        target_username = username or getattr(self.player, "username", None)
+        if not target_username:
+            return None
+        collection = db["balancesheet-collection"]
+        bs = collection.find_one({"username": target_username}, sort=[("_id", -1)])
+        prev_bs = bs.get("prev_balancesheet")
+        
+        if prev_bs:
+            return json.loads(prev_bs)
+        return None
 
     def update_liability_in_db(self, username, updates):
         """
@@ -356,31 +379,89 @@ class BalanceSheet:
 
         self.load_from_db(username)
 
-        self.liabilities = updates
+        # Build a lookup from update liabilities list by name
+        updates_by_name = {liab.get("name"): liab for liab in updates if "name" in liab}
+
+        # Replace or add liabilities: build new liabilities list
+        new_liabilities = []
+
+        # Track existing names found in updates
+        updated_names = set()
+
+        # Replace existing liabilities if in updates, else keep as is
+        for liab in self.liabilities:
+            liab_name = liab.get("name")
+            if liab_name in updates_by_name:
+                # Use updated liability
+                new_liabilities.append(copy.deepcopy(updates_by_name[liab_name]))
+                updated_names.add(liab_name)
+            else:
+                # Keep original if not updated
+                new_liabilities.append(copy.deepcopy(liab))
+
+        # Add any new liabilities in updates not already present
+        for name, liab in updates_by_name.items():
+            if name not in updated_names and name:
+                new_liabilities.append(copy.deepcopy(liab))
+
+        self.liabilities = new_liabilities
 
         for liability in self.liabilities:
             if liability.get("loanAmount") <= 0:
                 # Remove the liability if loanAmount <= 0, along with matching expenses
                 liab_name = liability.get("name")
-                self.liabilities = [liab for liab in self.liabilities if liab.get("name") != liab_name]
+                self.liabilities = [
+                    liab for liab in self.liabilities if liab.get("name") != liab_name
+                ]
                 self.expenses = [e for e in self.expenses if e.get("name") != liab_name]
                 continue
 
             ammotization = self.get_ammotization_of_liablity(liability)
             # Remove any existing expense entry with same name as liability
-            self.expenses = [i for i in self.expenses if i.get("name", None) != liability.get("name")]
+            self.expenses = [
+                i for i in self.expenses if i.get("name", None) != liability.get("name")
+            ]
             # Only add an expense if payment value is not None
             payment = ammotization.get("payment") if ammotization else None
             if payment is not None:
-                self.expenses.append({
-                    "name": liability.get("name"),
-                    "amount": payment
-                })
+                self.expenses.append({"name": liability.get("name"), "amount": payment})
 
         self.save_to_db(username)
         return self
 
     # INSERT_YOUR_CODE
+    def update_assets_in_db(self, username, updates):
+        """
+        Update the assets of the balance sheet in memory and persist them to the database.
+
+        Args:
+            username (str): The username whose balance sheet this is.
+            updates (list): List of new asset dicts to update to.
+
+        Returns:
+            self (BalanceSheet): The updated BalanceSheet instance.
+        """
+        self.load_from_db(username)
+
+        # Update or add assets from updates, without deleting existing ones
+
+        # Build a lookup for incoming assets by name
+        updates_by_name = {a["name"]: a for a in updates if "name" in a}
+        # Map current assets by name
+        current_assets_by_name = {a.get("name"): a for a in self.assets if "name" in a}
+
+        # Update existing assets or add new ones
+        for name, updated_asset in updates_by_name.items():
+            if name in current_assets_by_name:
+                current_assets_by_name[name].update(updated_asset)
+            else:
+                self.assets.append(updated_asset)
+
+        # No deletion: assets not in updates are preserved
+
+        self.save_to_db(username)
+        return self
+
     def save_to_db(self, username):
         """
         Save the current balance sheet to the database under the given username.
@@ -390,7 +471,23 @@ class BalanceSheet:
         with db_call_guard("BalanceSheet.save_to_db"):
             collection = db["balancesheet-collection"]
             data = self.to_dict()
-           
+
+            prev_balancesheet = collection.find_one({"username": username})
+            
+
+            current_cashflow = data.get("cashflow", 0)
+            prev_cashflow = prev_balancesheet.get("cashflow", 0)
+
+            if not prev_balancesheet or (current_cashflow != prev_cashflow):
+                if not prev_balancesheet:
+                    prev_balancesheet = json.dumps(data)
+                prev_balancesheet = {
+                    **prev_balancesheet
+                }
+                prev_balancesheet.pop("_id", None)
+                prev_balancesheet.pop("prev_balancesheet", None)
+                data["prev_balancesheet"] = json.dumps(prev_balancesheet)
+
             data["username"] = username
             # Only use _id if it exists
             if self.id is not None:

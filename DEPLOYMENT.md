@@ -1,6 +1,67 @@
-# Gunicorn Deployment Guide
+# Deployment Guide
 
-This guide explains how to deploy your Flask-SocketIO application using Gunicorn.
+This guide explains how to deploy your Flask-SocketIO application using Gunicorn, including deployment to Railway.
+
+## Railway Deployment (Recommended)
+
+Railway is a cloud platform that makes deployment simple. The project is already configured for Railway deployment.
+
+### Prerequisites
+
+1. A Railway account (sign up at [railway.app](https://railway.app))
+2. Railway CLI installed (optional, for local testing):
+   ```bash
+   npm i -g @railway/cli
+   ```
+
+### Deployment Steps
+
+1. **Create a new project on Railway:**
+   - Go to [railway.app](https://railway.app)
+   - Click "New Project"
+   - Select "Deploy from GitHub repo" (recommended) or "Empty Project"
+
+2. **Configure Environment Variables:**
+   In your Railway project settings, add the following environment variables:
+   - `MONGO_DB_CONNECTION_STRING`: Your MongoDB connection string
+   - `SOCKETIO_ASYNC_MODE`: Set to `threading` (default, already configured)
+   - `GUNICORN_WORKERS`: (Optional) Number of workers (defaults to CPU count * 2 + 1)
+   - `GUNICORN_THREADS`: (Optional) Threads per worker (defaults to 2)
+
+3. **Deploy:**
+   - If using GitHub: Railway will automatically detect the `Procfile` and deploy
+   - If using Railway CLI:
+     ```bash
+     railway login
+     railway init
+     railway up
+     ```
+
+4. **Verify Deployment:**
+   - Railway will provide a URL (e.g., `https://your-app.railway.app`)
+   - The application will be accessible at this URL
+   - Socket.IO will work automatically as Railway supports WebSocket connections
+
+### Railway Configuration Files
+
+The project includes:
+- `Procfile`: Defines the web process command
+- `railway.json`: Railway-specific configuration
+- `.railwayignore`: Files to exclude from deployment
+- `gunicorn_config.py`: Updated to use Railway's `PORT` environment variable
+
+### Important Notes for Railway
+
+- **Port Configuration**: Railway automatically sets the `PORT` environment variable. The application is configured to use this automatically.
+- **WebSocket Support**: Railway natively supports WebSocket connections, so Socket.IO will work without additional configuration.
+- **Environment Variables**: Set all required environment variables in the Railway dashboard under your project settings.
+- **Logs**: View logs directly in the Railway dashboard or using `railway logs` command.
+
+---
+
+## Gunicorn Deployment Guide (Self-Hosted)
+
+This section explains how to deploy your Flask-SocketIO application using Gunicorn on your own server.
 
 ## Prerequisites
 
@@ -35,14 +96,15 @@ gunicorn --config gunicorn_config.py wsgi:application
 
 **With custom settings:**
 ```bash
-gunicorn --bind 0.0.0.0:5000 --workers 4 --worker-class eventlet wsgi:application
+gunicorn --bind 0.0.0.0:5000 --workers 4 --worker-class gthread --threads 2 wsgi:application
 ```
 
 ## Configuration
 
 The `gunicorn_config.py` file contains all the configuration settings. You can customize it or override settings using environment variables:
 
-- `GUNICORN_BIND`: Server bind address (default: `0.0.0.0:5000`)
+- `PORT`: Port number (used by Railway, defaults to 5000)
+- `GUNICORN_BIND`: Server bind address (default: `0.0.0.0:5000` or uses PORT env var)
 - `GUNICORN_WORKERS`: Number of worker processes (default: CPU count * 2 + 1)
 - `GUNICORN_ACCESS_LOG`: Access log file path (default: stdout)
 - `GUNICORN_ERROR_LOG`: Error log file path (default: stderr)
@@ -58,9 +120,9 @@ gunicorn --config gunicorn_config.py wsgi:application
 
 ## Important Notes
 
-1. **Worker Class**: This application uses `eventlet` workers, which is required for Flask-SocketIO to work properly with Gunicorn.
+1. **Worker Class**: This application uses `gthread` workers, which is required for Flask-SocketIO to work properly with Gunicorn. The threading mode provides good performance and compatibility.
 
-2. **SocketIO Async Mode**: The application is configured to use `eventlet` async mode when running with Gunicorn. This is set via the `SOCKETIO_ASYNC_MODE` environment variable (defaults to `eventlet`).
+2. **SocketIO Async Mode**: The application is configured to use `threading` async mode when running with Gunicorn. This is set via the `SOCKETIO_ASYNC_MODE` environment variable (defaults to `threading`).
 
 3. **Development vs Production**: 
    - For development, continue using `run.py` with `socketio.run()`

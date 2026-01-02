@@ -1,6 +1,7 @@
 from app import db
 from app.utils.db_guard import db_call_guard
 from classes.BalanceSheet.index import BalanceSheet
+from classes.Property.index import Property
 # from classes.Job.index import Job
 
 BASE_TOTAL_TIME = 720
@@ -101,7 +102,15 @@ class Player:
         return 0
 
     def add_property(self, property_item):
-        self.properties.append(property_item)
+        # INSERT_YOUR_CODE
+        if self is None:
+            raise ValueError("Player is null")
+
+        property = Property(self)
+        property.from_dict(property_item)
+        self.balancesheet.add_asset(name=property_item['title'], income=property_item['income'], value=property_item['price'], username=self.username)
+        property.save_to_db()
+        self.properties.append(str(property._id))
         self.save_to_db()
 
     def add_crypto(self, crypto_item):
@@ -263,6 +272,7 @@ class Player:
             users_collection = db["users-collection"]
             player_data = users_collection.find_one({"username": username})
             if player_data:
+                print('FOUND PLAYER :', player_data.get("_id"))
                 # Always load the balancesheet with the player class.
                 balancesheet = BalanceSheet.load_from_db(username=username) or None
 
