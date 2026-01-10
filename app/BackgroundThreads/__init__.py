@@ -13,6 +13,7 @@ import logging
 from classes.BalanceSheet.index import BalanceSheet
 from classes.Bank.index import Bank
 from classes.Player.index import Player
+from classes.Lotto.index import Lotto
 
 
 # Set up logging
@@ -352,3 +353,130 @@ def update_properties_in_background(player, Property, property_ids, years, updat
 
     except Exception as e:
         print(f"Exception in update_properties_in_background: {e}")
+
+
+def bg_process_lotto_ticket(lotto_ticket: "Lotto", player: "Player", delay_seconds=None):
+    """
+    Background task to process a lotto ticket after the delay period.
+    This function runs in a background thread/task and emits SocketIO events when complete.
+    
+    Args:
+        lotto_ticket: Lotto ticket instance to process
+        player: Player instance who owns the ticket
+        delay_seconds: Optional delay in seconds (if None, calculates from ticket.result_at)
+    """
+    # Calculate wait time
+    if delay_seconds is None:
+        if lotto_ticket.result_at:
+            from datetime import datetime
+            now = datetime.utcnow()
+            result_time = lotto_ticket.result_at
+            if isinstance(result_time, str):
+                # Parse ISO format string
+                try:
+                    # Try Python 3.7+ fromisoformat
+                    result_time = datetime.fromisoformat(result_time.replace('Z', '+00:00'))
+                except (ValueError, AttributeError):
+                    # Fallback for older Python versions or different formats
+                    try:
+                        result_time = datetime.strptime(result_time.replace('Z', ''), '%Y-%m-%dT%H:%M:%S.%f')
+                    except ValueError:
+                        result_time = datetime.strptime(result_time.replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
+            elif not isinstance(result_time, datetime):
+                # If it's not a datetime object, default to 1 hour
+                wait_seconds = 3600
+                result_time = None
+            else:
+                result_time = result_time
+            
+            if result_time:
+                wait_seconds = max(0, (result_time - now).total_seconds())
+            else:
+                wait_seconds = 3600
+        else:
+            # Default to 1 hour if no result_at set
+            wait_seconds = 3600
+    else:
+        wait_seconds = delay_seconds
+    
+    # Wait for the delay period
+    if wait_seconds > 0:
+        logger.info(f"Waiting {wait_seconds} seconds before processing lotto ticket for {player.username}")
+        time.sleep(wait_seconds)
+    
+    # Ensure we have Flask application context for database operations
+    with app.app_context():
+        try:
+            logger.info(
+                f"Processing lotto ticket for player {player.username}, ticket_id: {lotto_ticket._id}"
+            )
+            
+            # Reload ticket from DB to ensure we have latest data
+            ticket = Lotto.load_from_db(lotto_ticket._id, player=player)
+            if not ticket:
+                raise ValueError(f"Ticket {lotto_ticket._id} not found")
+            
+            # Check if ticket is ready to be processed
+            if ticket.status != "pending":
+                logger.warning(f"Ticket {ticket._id} is not pending (status: {ticket.status})")
+                return
+            
+            # Process the ticket (check winning condition)
+            result = ticket.check_winning_condition()
+            
+            # If player won, add prize to their bank account
+            bank = None
+            if result["status"] == "won" and result["prize_amount"] > 0:
+                from classes.Bank.index import Bank
+                bank = Bank(customer=player)
+                bank.load_bank_data()
+                bank.deposit(
+                    amount=result["prize_amount"],
+                    sender="Lotto Office",
+                    message=f"Lotto prize for ticket {str(ticket._id)}"
+                )
+                logger.info(
+                    f"Prize of {result['prize_amount']} deposited to {player.username}'s bank account"
+                )
+            
+            # Reload player to get updated balancesheet
+            updated_player = Player.load_from_db(player.username)
+            balancesheet = BalanceSheet(player=updated_player)
+            
+            # Emit success event to the player's room
+            _emit_to_room(
+                socketio,
+                "lotto_result_ready",
+                {
+                    "username": player.username,
+                    "ticket_id": str(ticket._id),
+                    "message": "Lotto ticket result is ready!",
+                    "payload": {
+                        "ticket": ticket.to_dict(),
+                        "result": result,
+                        "balancesheet": balancesheet.to_dict(),
+                        "bank": bank.to_dict() if bank else None,
+                    },
+                },
+                room=player.username,
+            )
+            logger.info(f"Lotto ticket processed successfully for {player.username}")
+            
+        except Exception as e:
+            logger.error(
+                f"Error processing lotto ticket for {player.username}: {str(e)}",
+                exc_info=True,
+            )
+            # Emit error event to the player's room
+            _emit_to_room(
+                socketio,
+                "lotto_result_ready",
+                {
+                    "username": player.username,
+                    "ticket_id": str(lotto_ticket._id) if lotto_ticket._id else None,
+                    "error": str(e),
+                    "success": False,
+                    "message": "Failed to process lotto ticket",
+                },
+                room=player.username,
+            )
