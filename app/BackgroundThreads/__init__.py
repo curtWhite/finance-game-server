@@ -14,6 +14,8 @@ from classes.BalanceSheet.index import BalanceSheet
 from classes.Bank.index import Bank
 from classes.Player.index import Player
 from classes.Lotto.index import Lotto
+from classes.Farm.index import Farm
+from classes.GameState.index import GameState
 
 
 # Set up logging
@@ -479,4 +481,108 @@ def bg_process_lotto_ticket(lotto_ticket: "Lotto", player: "Player", delay_secon
                     "message": "Failed to process lotto ticket",
                 },
                 room=player.username,
+            )
+
+
+def bg_update_farm_timers(username=None, farm_id=None):
+    """
+    Background task to update farm timers (crops, animals, pregnancy).
+    This function runs in a background thread/task and emits Socket.IO events when crops are ready or animals give birth.
+    
+    Args:
+        username: Optional username to update specific user's farms
+        farm_id: Optional farm_id to update specific farm
+    """
+    # Ensure we have Flask application context for database operations
+    with app.app_context():
+        try:
+            gameState = GameState.get_instance()
+            currentGameDate = gameState.get_current_date()
+            
+            farms_to_update = []
+            
+            if farm_id and username:
+                # Update specific farm
+                farm = Farm.load_from_db(farm_id=farm_id, username=username)
+                if farm:
+                    farms_to_update.append(farm)
+            elif username:
+                # Update all farms for a user
+                farms_to_update = Farm.load_all_by_username(username)
+            else:
+                # Update all farms (use with caution - could be slow)
+                logger.warning("Updating all farms - this may be slow")
+                # For now, skip global update - require username or farm_id
+                return
+            
+            events_emitted = []
+            
+            for farm in farms_to_update:
+                try:
+                    # Store initial state to detect changes
+                    initial_ready_plots = len(farm.getReadyPlots())
+                    initial_animals_count = len(farm.animals)
+                    
+                    # Update timers
+                    farm.updateTimers(currentGameDate)
+                    
+                    # Check for changes and emit events
+                    ready_plots = farm.getReadyPlots()
+                    new_ready_plots = len(ready_plots) - initial_ready_plots
+                    
+                    if new_ready_plots > 0:
+                        # Crops are ready
+                        _emit_to_room(
+                            socketio,
+                            "farm_crops_ready",
+                            {
+                                "username": farm.username,
+                                "farm_id": str(farm._id),
+                                "message": f"{new_ready_plots} plot(s) are ready for harvest",
+                                "payload": {
+                                    "ready_plots": ready_plots,
+                                    "farm": farm.toDict(),
+                                },
+                            },
+                            room=farm.username,
+                        )
+                        events_emitted.append(f"crops_ready_{farm.username}")
+                    
+                    # Check for new animals (births)
+                    new_animals_count = len(farm.animals) - initial_animals_count
+                    if new_animals_count > 0:
+                        # Animals gave birth
+                        _emit_to_room(
+                            socketio,
+                            "farm_animals_birth",
+                            {
+                                "username": farm.username,
+                                "farm_id": str(farm._id),
+                                "message": f"{new_animals_count} new animal(s) were born",
+                                "payload": {
+                                    "farm": farm.toDict(),
+                                },
+                            },
+                            room=farm.username,
+                        )
+                        events_emitted.append(f"animals_birth_{farm.username}")
+                    
+                    # Save updated farm
+                    farm.save_to_db()
+                    
+                except Exception as farm_error:
+                    logger.error(
+                        f"Error updating farm {farm._id if farm else 'unknown'}: {str(farm_error)}",
+                        exc_info=True
+                    )
+            
+            if events_emitted:
+                logger.info(f"Farm timer updates completed. Events emitted: {events_emitted}")
+            else:
+                logger.info(f"Farm timer updates completed. No events to emit.")
+            
+        except Exception as e:
+            logger.error(
+                f"Error in bg_update_farm_timers: {str(e)}",
+                exc_info=True
             )
